@@ -4,6 +4,8 @@ import { EXAMPLES } from './examples.js';
 import { SNIPPETS } from './snippets.js';
 import { initChat } from './chat.js';
 import { createEditor } from './src/editor.js';
+import { mountVisual } from './src/VisualPanel.jsx';
+import { createMidiKnob } from './src/midi-knob.js';
 
 const $ = (id) => document.getElementById(id);
 const el = { play: $('play'), stop: $('stop'), bpm: $('bpm'), bpmOut: $('bpm-out'), root: $('key-root'), mode: $('key-mode'),
@@ -225,17 +227,33 @@ el.mode.addEventListener('change', () => { lock.key = true; store.set('mode', el
 el.bank.addEventListener('change', () => { store.set('bank', el.bank.value); rerunSoon(); });
 const snippetsEl = $('snippets');
 const chatEl = $('chat');
+const visualEl = $('visual');
 function showPanel(which) {   // 'help' | 'snippets' | 'chat' | 'pj' | null
   el.help.hidden = which !== 'help';
   for (const [name, node] of Object.entries(extraPanels)) node.hidden = which !== name;
   chatEl.hidden = which !== 'chat';
+  visualEl.hidden = which !== 'visual';
   snippetsEl.hidden = which !== 'snippets';
   store.set('panel', which ?? 'none');
 }
 el.helpToggle.addEventListener('click', () => showPanel(el.help.hidden ? 'help' : null));
 $('chat-toggle').addEventListener('click', () => showPanel(chatEl.hidden ? 'chat' : null));
+$('visual-toggle').addEventListener('click', () => showPanel(visualEl.hidden ? 'visual' : null));
 $('snippets-toggle').addEventListener('click', () => showPanel(snippetsEl.hidden ? 'snippets' : null));
 showPanel(store.get('panel', 'help') === 'none' ? null : store.get('panel', 'help'));
+
+// Visual editors: every click/drag is an exact text edit in the editor; if the song is playing the change is heard right away.
+// Re-runs at most ~6 times a second, one at a time (a knob sends far more than that).
+let liveTimer, liveLast = 0, liveBusy = false, liveAgain = false;
+async function liveRun() {
+  if (!playing) return;
+  if (liveBusy) { liveAgain = true; return; }
+  liveBusy = true; liveLast = performance.now();
+  try { await run(); } finally { liveBusy = false; if (liveAgain) { liveAgain = false; liveEdited(); } }
+}
+function liveEdited() { clearTimeout(liveTimer); liveTimer = setTimeout(liveRun, Math.max(0, 160 - (performance.now() - liveLast))); }
+const midi = createMidiKnob({ editor, onEdited: liveEdited });
+mountVisual(visualEl, { editor, onEdited: liveEdited, midi });
 
 // Snippet library: whole parts (Drums, Bass, ...) are added as a new track; Effects go on the end of the line you're on.
 function addSnippet(category, code) {

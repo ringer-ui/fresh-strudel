@@ -38,6 +38,7 @@
 
     <select id="examples" title="Examples"><option value="">Examples…</option></select>
     <button id="chat-toggle" title="Ask Claude to change the song">Chat</button>
+    <button id="visual-toggle" title="Edit drums, notes and knobs by clicking">Visual</button>
     <button id="snippets-toggle" title="Ready-made parts to add">Snippets</button>
     <button id="export" title="Download as a .strudel file">Save</button>
     <label class="btn" title="Open a .strudel / .js / .txt file">Open<input id="import" type="file" accept=".strudel,.js,.txt" hidden></label>
@@ -67,6 +68,8 @@
       <div id="chat-log" class="chat-log" aria-live="polite"></div>
       <div class="chat-input"><textarea id="chat-input" rows="2" placeholder="Ask for a change…"></textarea><button id="chat-send" class="primary">Send</button></div>
     </aside>
+
+    <aside id="visual" class="help visual" hidden aria-label="Visual editors"></aside>
 
     <aside id="snippets" class="help snippets" hidden>
       <h2>Snippets</h2>

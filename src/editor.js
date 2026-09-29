@@ -57,6 +57,17 @@ const playingField = StateField.define({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+// ---- the number a MIDI knob is currently driving ----
+const setTarget = StateEffect.define();
+const targetField = StateField.define({
+  create: () => Decoration.none,
+  update(value, tr) {
+    for (const e of tr.effects) if (e.is(setTarget)) return e.value ? Decoration.set([Decoration.mark({ class: 'cm-knob-target' }).range(e.value[0], e.value[1])]) : Decoration.none;
+    return tr.docChanged ? value.map(tr.changes) : value;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
 // ---- look: follows the page's colour variables (dark and light) ----
 const theme = EditorView.theme({
   '&': { height: '100%', backgroundColor: 'var(--bg)', color: 'var(--text)', fontSize: '15px' },
@@ -72,6 +83,7 @@ const theme = EditorView.theme({
   '.cm-tooltip-autocomplete ul': { fontFamily: 'var(--mono)', fontSize: '13px' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--accent)', color: '#fff' },
   '.cm-completionDetail': { color: 'var(--dim)', fontStyle: 'normal', marginLeft: '.8em' },
+  '.cm-knob-target': { outline: '2px solid var(--accent-2)', borderRadius: '3px', backgroundColor: 'color-mix(in srgb, var(--accent-2) 25%, transparent)' },
   '.cm-playing': { backgroundColor: 'color-mix(in srgb, var(--accent) 35%, transparent)', borderRadius: '3px', outline: '1px solid var(--accent)' },
   '.cm-mn-num': { color: 'var(--syn-num)' }, '.cm-mn-note': { color: 'var(--syn-note)' }, '.cm-mn-rest': { color: 'var(--dim)' },
   '.cm-mn-op': { color: 'var(--syn-op)' }, '.cm-mn-br': { color: 'var(--syn-br)' },
@@ -128,13 +140,14 @@ export function locateError(doc, message) {
 }
 
 export function createEditor({ parent, doc, onChange, onRun, onStop, getNames }) {
+  const listeners = new Set();
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc,
       extensions: [
         lineNumbers(), lintGutter(), history(), drawSelection(), highlightActiveLine(), bracketMatching(), closeBrackets(), indentOnInput(),
-        javascript(), syntaxHighlighting(highlight), miniPlugin, playingField, theme,
+        javascript(), syntaxHighlighting(highlight), miniPlugin, playingField, targetField, theme,
         autocompletion({ override: [completionSource(getNames)], icons: false }),
         keymap.of([
           { key: 'Mod-Enter', preventDefault: true, run: () => { onRun(); return true; } },
@@ -142,7 +155,10 @@ export function createEditor({ parent, doc, onChange, onRun, onStop, getNames })
           indentWithTab, ...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, ...defaultKeymap,
         ]),
         EditorView.contentAttributes.of({ 'aria-label': 'Song code', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' }),
-        EditorView.updateListener.of((u) => { if (u.docChanged && !u.transactions.some((tr) => tr.annotation(silent))) onChange(); }),
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged && !u.transactions.some((tr) => tr.annotation(silent))) onChange();
+          if (u.docChanged || u.selectionSet) queueMicrotask(() => { for (const f of listeners) f(); });   // after this update finishes: listeners may dispatch too
+        }),
       ],
     }),
   });
@@ -177,6 +193,18 @@ export function createEditor({ parent, doc, onChange, onRun, onStop, getNames })
       const ok = ranges.filter(([a, b]) => Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b <= n && a < b && inString(a, b));
       if (!ok.length && !view.state.field(playingField).size) return;     // nothing to clear
       view.dispatch({ effects: setPlaying.of(ok), annotations: silent.of(true) });
+    },
+    // The visual editors' hooks: where the cursor is, be told about edits and cursor moves, replace an exact range (calls onChange).
+    cursor() { return view.state.selection.main.head; },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    replace(from, to, text) { view.dispatch({ changes: { from, to, insert: text } }); },
+    moveTo(pos) { view.dispatch({ selection: { anchor: Math.min(pos, view.state.doc.length) }, scrollIntoView: true }); },
+    selection() { const r = view.state.selection.main; return { from: r.from, to: r.to }; },
+    markTarget(range) {
+      const n = view.state.doc.length;
+      const ok = range && range[0] < range[1] && range[1] <= n ? range : null;
+      if (!ok && !view.state.field(targetField).size) return;
+      view.dispatch({ effects: setTarget.of(ok), annotations: silent.of(true) });
     },
     focus() { view.focus(); },
   };
