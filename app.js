@@ -272,7 +272,11 @@ el.mode.addEventListener('change', () => { lock.key = true; store.set('mode', el
 el.bank.addEventListener('change', () => { store.set('bank', el.bank.value); rerunSoon(); });
 const snippetsEl = $('snippets'), chatEl = $('chat'), visualEl = $('visual'), historyEl = $('history');
 // Panels live in the dock (workspace.js): several can be open at once, resized, collapsed, and moved to either side.
-applyTheme(store.get('theme', 'system'));
+const themeSel = $('theme');
+for (const [k, v] of Object.entries(THEMES)) themeSel.add(new Option(k === 'system' ? 'Display: match system' : `Display: ${v}`, k));
+const setTheme = (k) => { store.set('theme', k); themeSel.value = applyTheme(k); };
+setTheme(store.get('theme', 'system'));
+themeSel.addEventListener('change', () => setTheme(themeSel.value));
 const toolbar = { help: el.helpToggle, chat: $('chat-toggle'), visual: $('visual-toggle'), history: $('history-toggle'), snippets: $('snippets-toggle') };
 let dock = null;
 const syncToolbar = () => { if (!dock) return; for (const [name, b] of Object.entries(toolbar)) { const on = dock.isOpen(name); b.classList.toggle('panel-on', on); b.setAttribute('aria-pressed', String(on)); } };
@@ -493,7 +497,7 @@ const palette = createPalette({
     { title: 'Play / update', hint: '⌘↵', run: () => run() }, { title: 'Stop', hint: '⌘.', run: () => stop() },
     ...dock.titles().map(({ name, title }) => ({ title: `${dock.isOpen(name) ? 'Close' : 'Open'} ${title}`, hint: 'panel', keywords: 'panel toggle show hide dock', run: () => dock.toggle(name) })),
     { title: `Move the panels to the ${dock.side === 'left' ? 'right' : 'left'}`, hint: 'layout', keywords: 'dock side', run: () => dock.setSide(dock.side === 'left' ? 'right' : 'left') },
-    ...Object.entries(THEMES).map(([k, v]) => ({ title: `Theme: ${v}`, hint: 'look', run: () => { store.set('theme', k); applyTheme(k); } })),
+    ...Object.entries(THEMES).map(([k, v]) => ({ title: `Theme: ${v}`, hint: 'look', run: () => setTheme(k) })),
     ...[['roll', 'Piano roll'], ['spectrum', 'Spectrum'], ['scope', 'Scope'], ['off', 'Hide']].map(([m, t]) => ({ title: `Visuals: ${t}`, hint: 'look', run: () => visuals.setMode(m) })),
     ...session.scenes.map((v) => ({ title: `Scene: ${v.name}`, hint: 'scene', run: () => applyVersion(v, 'scene') })),
     { title: 'Save the song as a scene…', hint: 'scene', run: () => { const n = prompt('Scene name'); if (n) session.saveScene({ code: editor.value, settings: settingsNow(), name: n }); } },
