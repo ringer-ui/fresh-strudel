@@ -6,6 +6,7 @@ import { initChat } from './chat.js';
 import { createEditor } from './src/editor.js';
 import { mountVisual } from './src/VisualPanel.jsx';
 import { createMidiKnob } from './src/midi-knob.js';
+import { createVisuals } from './src/viz.js';
 
 const $ = (id) => document.getElementById(id);
 const el = { play: $('play'), stop: $('stop'), bpm: $('bpm'), bpmOut: $('bpm-out'), root: $('key-root'), mode: $('key-mode'),
@@ -104,13 +105,23 @@ function renderMixer() {
 // ---- lighting up the notes that are sounding ----
 // Strudel remembers where in the code each event came from (hap.context.locations, offsets into the code it evaluated);
 // prepare() reports how those map back to what you typed. About 30 times a second, only while playing and the tab is visible.
+// The cycle you are hearing right now (the scheduler runs ahead by its latency plus the device's own delay).
+function audibleCycle() {
+  const s = repl.scheduler, ctx = strudel.getAudioContext();
+  return s.seconds_at_cps_change == null ? s.now() : s.num_cycles_at_cps_change + (ctx.currentTime - (ctx.outputLatency || 0) - s.seconds_at_cps_change - s.latency) * s.cps;
+}
+let analyser = null;                                          // taps the master output; created the first time visuals need it
+function getAnalyser() {
+  if (analyser || !master) return analyser;
+  try { analyser = master.context.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.7; master.connect(analyser); } catch (e) { console.warn('analyser unavailable', e); }
+  return analyser;
+}
 let ranSource = '', toSource = () => null, lightTimer = null;
 function lightNow() {
   const s = repl?.scheduler;
   if (!playing || document.hidden || !s?.pattern || editor.value !== ranSource) { editor.highlight([]); return; }
   try {
-    const ctx = strudel.getAudioContext();
-    const t = s.seconds_at_cps_change == null ? s.now() : s.num_cycles_at_cps_change + (ctx.currentTime - (ctx.outputLatency || 0) - s.seconds_at_cps_change - s.latency) * s.cps;
+    const t = audibleCycle();
     const ranges = [];
     const pulse = 0.16 * s.cps;                                     // an event glows for ~160 ms after it starts (long sustained ones don't stay lit)
     for (const h of s.pattern.queryArc(t - pulse, t)) if (h.hasOnset()) for (const l of h.context?.locations ?? []) {
@@ -122,6 +133,11 @@ function lightNow() {
 }
 const startLights = () => { if (!lightTimer) lightTimer = setInterval(lightNow, 33); };
 const stopLights = () => { clearInterval(lightTimer); lightTimer = null; editor.highlight([]); };
+
+const visuals = createVisuals({
+  root: $('viz'), store, toMidi: (n) => strudel.noteToMidi(n),
+  getScheduler: () => repl?.scheduler, getCycle: () => audibleCycle(), getAnalyser: () => getAnalyser(),
+});
 
 // ---- running ----
 // Returns true when the code evaluated without error.
@@ -145,7 +161,7 @@ async function run() {
   }
   if (evalFailed) return false;   // Strudel reports eval errors through onEvalError instead of throwing
   playing = true;
-  startLights();
+  startLights(); visuals.setPlaying(true);
   try {
     const ctx = strudel.getAudioContext();
     if (ctx.state !== 'running') await ctx.resume();          // browsers keep audio locked until a click
@@ -211,7 +227,7 @@ function stop() {
   strudel.resetGlobalEffects?.();   // clears reverb/delay tails
   setMaster(0);
   playing = false;
-  stopLights();
+  stopLights(); visuals.setPlaying(false);
   setStatus('Stopped.');
 }
 
