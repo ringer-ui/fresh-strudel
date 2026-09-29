@@ -72,3 +72,10 @@ test('number formatting and slider maths round-trip', () => {
   assert.ok(Math.abs(fromPos(s, toPos(s, 400)) - 400) <= 1);
   assert.equal(toPos(CONTROLS.gain, 0), 0);
 });
+
+import { findSliderCalls } from '../src/visual.js';
+test("Strudel's own slider(value, min, max) calls become inline sliders", () => {
+  const code = 'note("c3").lpf(slider(800, 200, 4000)).gain(slider(0.5))\n// slider(9)';
+  const s = findSliderCalls(code);
+  assert.deepEqual(s.map((x) => [code.slice(x.from, x.to), x.spec.lo, x.spec.hi]), [['800', 200, 4000], ['0.5', 0, 1]]);
+});

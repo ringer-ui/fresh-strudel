@@ -204,3 +204,6 @@ main.dock-left .dock-handle { left: auto; right: -3px; }
 .hist-diff, .hist-ctx { margin: 6px 0; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow: auto; max-height: 260px; }
 .hist-diff .add { color: var(--accent-2); }
 .hist-diff .del { color: var(--err); }
+
+.viz-opts { margin-left: auto; display: flex; gap: 12px; }
+.viz-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

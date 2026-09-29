@@ -1,13 +1,15 @@
 // The code editor: CodeMirror 6 with Strudel-aware colours, autocomplete and inline error marks.
 // It exposes a small facade so the rest of the app (which grew up around a <textarea>) doesn't need to know about CodeMirror.
 import { EditorState, Annotation, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, Decoration, ViewPlugin } from '@codemirror/view';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { javascript } from '@codemirror/lang-javascript';
 import { syntaxHighlighting, HighlightStyle, bracketMatching, indentOnInput, syntaxTree } from '@codemirror/language';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
 import { setDiagnostics, lintGutter } from '@codemirror/lint';
 import { tags as t } from '@lezer/highlight';
+import { findControls, findSliderCalls, formatNumber, toPos, fromPos } from './visual.js';
+import { numberSpots, stepSpot } from './knob.js';
 
 const silent = Annotation.define();
 
@@ -57,6 +59,73 @@ const playingField = StateField.define({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+// ---- inline sliders: a small slider right after each tweakable number (.lpf(400), { vol: .5 }) and Strudel's own slider(...) ----
+const refreshDeco = StateEffect.define();
+class SliderWidget extends WidgetType {
+  constructor(c, onEdit) { super(); this.c = c; this.onEdit = onEdit; }
+  eq(o) { const a = this.c, b = o.c; return a.from === b.from && a.to === b.to && a.value === b.value && a.name === b.name; }
+  sync(dom) {
+    const input = dom.firstChild, c = this.c;
+    dom._c = c; input.title = `${c.name} ${formatNumber(c.value, c.spec.step)} (drag)`; input.setAttribute('aria-label', `${c.name} slider`);
+    if (!dom._drag) input.value = String(Math.round(toPos(c.spec, c.value) * 1000));          // don't fight the thumb while it is being dragged
+  }
+  toDOM(view) {
+    const wrap = document.createElement('span'); wrap.className = 'cm-slider';
+    const input = document.createElement('input'); input.type = 'range'; input.min = '0'; input.max = '1000'; input.step = '1';
+    input.addEventListener('pointerdown', () => { wrap._drag = true; });
+    const end = () => { wrap._drag = false; };
+    input.addEventListener('pointerup', end); input.addEventListener('pointercancel', end); input.addEventListener('blur', end);
+    input.addEventListener('input', () => { const c = wrap._c; this.onEdit(view, c.from, c.to, formatNumber(fromPos(c.spec, Number(input.value) / 1000), c.spec.step)); });
+    wrap.append(input); this.sync(wrap); return wrap;
+  }
+  updateDOM(dom) { this.sync(dom); return true; }          // the number changed as you dragged: keep the same element, so the drag carries on
+  ignoreEvent() { return true; }
+}
+function sliderExtension(enabled, onEdit) {
+  return ViewPlugin.fromClass(class {
+    constructor(view) { this.decorations = this.build(view); }
+    update(u) { if (u.docChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(refreshDeco)))) this.decorations = this.build(u.view); }
+    build(view) {
+      if (!enabled()) return Decoration.none;
+      const doc = view.state.doc.toString();
+      if (doc.length > 60000) return Decoration.none;
+      const items = [...findControls(doc), ...findSliderCalls(doc)].sort((a, b) => a.to - b.to).slice(0, 80);
+      return Decoration.set(items.map((c) => Decoration.widget({ widget: new SliderWidget(c, onEdit), side: 1 }).range(c.to)), true);
+    }
+  }, { decorations: (v) => v.decorations });
+}
+
+// ---- inline visuals: a small piano roll under each track's code while it plays (drawn by app.js through inlineCanvases) ----
+const setInline = StateEffect.define();
+class InlineVizWidget extends WidgetType {
+  constructor(name, registry) { super(); this.name = name; this.registry = registry; }
+  eq(o) { return o.name === this.name; }
+  toDOM() {
+    const box = document.createElement('div'); box.className = 'cm-inline-viz';
+    const label = document.createElement('span'); label.textContent = this.name;
+    const canvas = document.createElement('canvas'); canvas.setAttribute('aria-hidden', 'true');
+    box.append(canvas, label); this.registry.set(this.name, canvas); return box;
+  }
+  destroy(dom) { const c = dom.querySelector('canvas'); if (this.registry.get(this.name) === c) this.registry.delete(this.name); }
+  ignoreEvent() { return true; }
+}
+function inlineExtension(registry) {
+  return StateField.define({
+    create: () => Decoration.none,
+    update(value, tr) {
+      for (const e of tr.effects) if (e.is(setInline)) return Decoration.set(e.value.map(({ pos, name }) => Decoration.widget({ widget: new InlineVizWidget(name, registry), block: true, side: 1 }).range(pos)), true);
+      return tr.docChanged ? value.map(tr.changes) : value;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
+}
+const jumpNumber = (dir) => (view) => {
+  const { from, to } = view.state.selection.main;
+  const spot = stepSpot(numberSpots(view.state.doc.toString()), from, to, dir);
+  if (spot) view.dispatch({ selection: { anchor: spot.from, head: spot.to }, scrollIntoView: true });
+  return true;
+};
+
 // ---- the number a MIDI knob is currently driving ----
 const setTarget = StateEffect.define();
 const targetField = StateField.define({
@@ -83,6 +152,12 @@ const theme = EditorView.theme({
   '.cm-tooltip-autocomplete ul': { fontFamily: 'var(--mono)', fontSize: '13px' },
   '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--accent)', color: '#fff' },
   '.cm-completionDetail': { color: 'var(--dim)', fontStyle: 'normal', marginLeft: '.8em' },
+  '.cm-slider': { display: 'inline-block', verticalAlign: 'middle', marginLeft: '6px', lineHeight: 0 },
+  '.cm-slider input': { width: '72px', height: '14px', margin: 0, accentColor: 'var(--accent)', cursor: 'ew-resize', opacity: '.85' },
+  '.cm-slider input:hover, .cm-slider input:focus-visible': { opacity: '1' },
+  '.cm-inline-viz': { position: 'relative', height: '46px', margin: '2px 0 6px 3.2em', border: '1px solid var(--line)', borderRadius: '5px', overflow: 'hidden', background: 'var(--panel)' },
+  '.cm-inline-viz canvas': { display: 'block', width: '100%', height: '100%' },
+  '.cm-inline-viz span': { position: 'absolute', top: '2px', right: '6px', font: '10px var(--mono)', color: 'var(--dim)', pointerEvents: 'none' },
   '.cm-knob-target': { outline: '2px solid var(--accent-2)', borderRadius: '3px', backgroundColor: 'color-mix(in srgb, var(--accent-2) 25%, transparent)' },
   '.cm-playing': { backgroundColor: 'color-mix(in srgb, var(--accent) 35%, transparent)', borderRadius: '3px', outline: '1px solid var(--accent)' },
   '.cm-mn-num': { color: 'var(--syn-num)' }, '.cm-mn-note': { color: 'var(--syn-note)' }, '.cm-mn-rest': { color: 'var(--dim)' },
@@ -141,18 +216,22 @@ export function locateError(doc, message) {
 
 export function createEditor({ parent, doc, onChange, onRun, onStop, getNames }) {
   const listeners = new Set();
-  let pendingSource = null;                                    // who is making the next change (visual editor, knob, snippet...); null = the user typing
+  let pendingSource = null, slidersOn = true;
+  const inlineCanvases = new Map();                            // track name -> the canvas of its inline visual                                    // who is making the next change (visual editor, knob, snippet...); null = the user typing
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc,
       extensions: [
         lineNumbers(), lintGutter(), history(), drawSelection(), highlightActiveLine(), bracketMatching(), closeBrackets(), indentOnInput(),
-        javascript(), syntaxHighlighting(highlight), miniPlugin, playingField, targetField, theme,
+        javascript(), syntaxHighlighting(highlight), miniPlugin, playingField, targetField, inlineExtension(inlineCanvases),
+        sliderExtension(() => slidersOn, (view, from, to, text) => { pendingSource = 'slider'; view.dispatch({ changes: { from, to, insert: text } }); }),
+        theme,
         autocompletion({ override: [completionSource(getNames)], icons: false }),
         keymap.of([
           { key: 'Mod-Enter', preventDefault: true, run: () => { onRun(); return true; } },
           { key: 'Mod-.', preventDefault: true, run: () => { onStop(); return true; } },
+          { key: 'Alt-n', preventDefault: true, run: jumpNumber(1) }, { key: 'Alt-p', preventDefault: true, run: jumpNumber(-1) },
           indentWithTab, ...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, ...defaultKeymap,
         ]),
         EditorView.contentAttributes.of({ 'aria-label': 'Song code', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' }),
@@ -209,6 +288,10 @@ export function createEditor({ parent, doc, onChange, onRun, onStop, getNames })
       if (!ok && !view.state.field(targetField).size) return;
       view.dispatch({ effects: setTarget.of(ok), annotations: silent.of(true) });
     },
+    setSliders(on) { slidersOn = !!on; view.dispatch({ effects: refreshDeco.of(null), annotations: silent.of(true) }); },
+    setInline(list) { view.dispatch({ effects: setInline.of(list), annotations: silent.of(true) }); },   // [{ pos, name }]: where each track's visual goes
+    inlineCanvases() { return inlineCanvases; },
+    jumpNumber(dir) { jumpNumber(dir)(view); view.focus(); },
     focus() { view.focus(); },
   };
 }

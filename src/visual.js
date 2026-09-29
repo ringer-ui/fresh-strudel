@@ -176,3 +176,15 @@ export function formatNumber(v, step = 0.01) {
 // slider position (0..1) <-> value, linear or logarithmic
 export const toPos = (spec, v) => { const c = Math.min(spec.hi, Math.max(spec.lo, v)); return spec.log ? Math.log(c / spec.lo) / Math.log(spec.hi / spec.lo) : (c - spec.lo) / (spec.hi - spec.lo); };
 export const fromPos = (spec, p) => { const v = spec.log ? spec.lo * (spec.hi / spec.lo) ** p : spec.lo + p * (spec.hi - spec.lo); return Math.round(v / spec.step) * spec.step; };
+
+// Strudel's own inline sliders: slider(0.5, 0, 1) -> a draggable value. Same shape as a control, so the editor treats them alike.
+export function findSliderCalls(code) {
+  const m = maskComments(code), out = [];
+  for (const hit of m.matchAll(new RegExp(`\\bslider\\(\\s*(${NUM})\\s*(?:,\\s*(${NUM})\\s*,\\s*(${NUM}))?`, 'g'))) {
+    const at = hit.index + hit[0].indexOf(hit[1], hit[0].indexOf('('));
+    const lo = hit[2] !== undefined ? Number(hit[2]) : 0, hi = hit[3] !== undefined ? Number(hit[3]) : 1;
+    if (!(hi > lo)) continue;
+    out.push({ name: 'slider', how: 'slider', from: at, to: at + hit[1].length, value: Number(hit[1]), spec: { lo, hi, step: (hi - lo) / 100 } });
+  }
+  return out;
+}

@@ -69,3 +69,17 @@ export function createKnob({ mode = 'absolute', sensitivity = 1 } = {}) {
     reset() { id = null; last = null; },
   };
 }
+
+// Every number in the code outside strings and comments (the parameters you would tweak), in order. Used by "next number".
+export function numberSpots(code) {
+  const m = maskComments(code), spots = [];
+  for (const t of m.matchAll(NUM_TOKEN)) if (!inString(code, t.index)) spots.push({ from: t.index, to: t.index + t[0].length });
+  return spots;
+}
+// The spot after (dir = 1) or before (dir = -1) the selection, wrapping around; null if there are none.
+export function stepSpot(spots, selFrom, selTo, dir = 1) {
+  if (!spots.length) return null;
+  if (dir > 0) return spots.find((s) => s.from >= selTo && !(s.from === selFrom && s.to === selTo)) ?? spots[0];
+  const before = spots.filter((s) => s.to <= selFrom && !(s.from === selFrom && s.to === selTo));
+  return before.at(-1) ?? spots.at(-1);
+}

@@ -43,7 +43,7 @@ export function layoutRoll(events, now, w, h, { drumH = 10 } = {}) {
       y = noteH - ((e.lane.midi - range.lo + 1) / (range.hi - range.lo + 1)) * noteH;
     } else if (e.lane.kind === 'drum') { height = drumH - 2; y = h - drumsTotal + drums.indexOf(e.lane.name) * drumH + 1; }
     else continue;
-    rects.push({ x: x0, y, w: width, h: height, active: e.begin <= now && now < e.end, lane: e.lane, gain: e.gain });
+    rects.push({ x: x0, y, w: width, h: height, active: e.begin <= now && now < e.end, lane: e.lane, gain: e.gain, track: e.track });
   }
   return { rects, playheadX: x(now), drums };
 }
@@ -60,7 +60,7 @@ export function spectrumBands(bins, sampleRate, count = 48, fLo = 40, fHi = 1600
 const hueOf = (name) => { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 
 // ---- the widget ----
-export function createVisuals({ root, getScheduler, getCycle, getAnalyser, toMidi, store }) {
+export function createVisuals({ root, getScheduler, getCycle, getAnalyser, toMidi, store, trackAt = () => null }) {
   const canvas = root.querySelector('canvas'), g = canvas.getContext('2d');
   const buttons = [...root.querySelectorAll('button[data-m]')];
   let mode = store.get('viz', 'roll'), playing = false, timer = null;
@@ -84,7 +84,7 @@ export function createVisuals({ root, getScheduler, getCycle, getAnalyser, toMid
       for (const h of s.pattern.queryArc(c - 1, c + 3)) {
         if (!h.whole) continue;
         const lane = laneOf(h.value, toMidi);
-        if (lane) events.push({ begin: Number(h.whole.begin), end: Number(h.whole.end), lane, gain: Math.min(1, Math.max(0.25, Number(h.value.gain ?? 1))) });
+        if (lane) events.push({ begin: Number(h.whole.begin), end: Number(h.whole.end), lane, gain: Math.min(1, Math.max(0.25, Number(h.value.gain ?? 1))), track: trackAt(h.context?.locations) });
       }
     } catch { events = []; }
   }
@@ -98,7 +98,7 @@ export function createVisuals({ root, getScheduler, getCycle, getAnalyser, toMid
     for (let c = Math.ceil(now - VIEW.before); c <= now + VIEW.after; c++) { const x = ((c - (now - VIEW.before)) / span) * w; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
     for (const r of rects) {
       g.globalAlpha = 0.45 + 0.55 * r.gain;
-      g.fillStyle = r.lane.kind === 'drum' ? `hsl(${hueOf(r.lane.name)} 70% ${r.active ? 72 : 55}%)` : (r.active ? colors.text : colors.accent);
+      g.fillStyle = r.lane.kind === 'drum' ? `hsl(${hueOf(r.lane.name)} 70% ${r.active ? 72 : 55}%)` : r.track ? `hsl(${hueOf(r.track)} 75% ${r.active ? 75 : 58}%)` : (r.active ? colors.text : colors.accent);
       g.fillRect(r.x, r.y, r.w, r.h);
     }
     g.globalAlpha = 1;
@@ -156,4 +156,60 @@ export function createVisuals({ root, getScheduler, getCycle, getAnalyser, toMid
   new ResizeObserver(() => { if (!timer && mode !== 'off') sync(); }).observe(canvas);
   sync();
   return { setMode, setPlaying(p) { playing = p; events = []; cachedFor = null; sync(); }, get mode() { return mode; } };
+}
+
+// ---- inline visuals: one small roll per track, drawn into the canvases the editor puts under each track's code ----
+// Strudel gives one combined pattern, so an event is assigned to a track by where in the code it came from (its location).
+export function createInlineViz({ getCanvases, getScheduler, getCycle, toMidi, trackAt, store }) {
+  let timer = null, playing = false, enabled = store.get('inline', '1') !== '0', events = [], cachedFor = null, cachedCycle = -1;
+  const colors = {};
+  const readColors = () => { const cs = getComputedStyle(document.documentElement); for (const k of ['panel', 'line', 'dim', 'text']) colors[k] = cs.getPropertyValue('--' + k).trim() || '#888'; };
+  function fetchEvents(s, now) {
+    const c = Math.floor(now);
+    if (s.pattern === cachedFor && c === cachedCycle) return;
+    cachedFor = s.pattern; cachedCycle = c; events = [];
+    try {
+      for (const h of s.pattern.queryArc(c - 1, c + 3)) {
+        if (!h.whole) continue;
+        const lane = laneOf(h.value, toMidi), track = trackAt(h.context?.locations);
+        if (lane && track) events.push({ begin: Number(h.whole.begin), end: Number(h.whole.end), lane, track, gain: Math.min(1, Math.max(0.25, Number(h.value.gain ?? 1))) });
+      }
+    } catch { events = []; }
+  }
+  function frame() {
+    const s = getScheduler(); if (!s?.pattern) return;
+    const canvases = getCanvases(); if (!canvases.size) return;
+    let now; try { now = getCycle(); } catch { return; }
+    fetchEvents(s, now);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    for (const [name, canvas] of canvases) {
+      const w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      const g = canvas.getContext('2d'), mine = events.filter((e) => e.track === name);
+      const { rects, playheadX } = layoutRoll(mine, now, w, h, { drumH: 6 * dpr });
+      g.fillStyle = colors.panel; g.fillRect(0, 0, w, h);
+      g.strokeStyle = colors.line; g.lineWidth = 1;
+      const span = VIEW.before + VIEW.after;
+      for (let c = Math.ceil(now - VIEW.before); c <= now + VIEW.after; c++) { const x = ((c - (now - VIEW.before)) / span) * w; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+      for (const r of rects) {
+        g.globalAlpha = 0.45 + 0.55 * r.gain;
+        g.fillStyle = `hsl(${hueOf(name)} 75% ${r.active ? 76 : 58}%)`;
+        g.fillRect(r.x, r.y, r.w, Math.max(r.h, 2 * dpr));
+      }
+      g.globalAlpha = 1; g.strokeStyle = colors.dim; g.lineWidth = dpr; g.beginPath(); g.moveTo(playheadX, 0); g.lineTo(playheadX, h); g.stroke();
+    }
+  }
+  function sync() {
+    const active = playing && enabled && !document.hidden;
+    if (active && !timer) { readColors(); timer = setInterval(frame, 1000 / FPS); }
+    if (!active && timer) { clearInterval(timer); timer = null; }
+  }
+  document.addEventListener('visibilitychange', sync);
+  window.addEventListener('themechange', readColors);
+  sync();
+  return {
+    get enabled() { return enabled; },
+    setEnabled(on) { enabled = !!on; store.set('inline', on ? '1' : '0'); cachedFor = null; sync(); },
+    setPlaying(p) { playing = p; cachedFor = null; sync(); },
+  };
 }

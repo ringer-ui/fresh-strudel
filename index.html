@@ -58,6 +58,7 @@
         <div id="viz-resize" class="viz-resize" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
         <div class="viz-bar"><span>Visuals</span>
           <button data-m="roll">Roll</button><button data-m="spectrum">Spectrum</button><button data-m="scope">Scope</button><button data-m="off" title="Hide the visuals">Hide</button>
+          <span class="viz-opts"><label title="A small piano roll under each track while it plays"><input type="checkbox" id="opt-inline"> Inline</label> <label title="A slider next to each number you can tweak"><input type="checkbox" id="opt-sliders"> Sliders</label></span>
         </div>
         <canvas aria-label="Live visuals of the song"></canvas>
       </div>
@@ -131,7 +132,8 @@
       <h3>Everything else</h3>
       <p>All of Strudel works: <code>.fast(2)</code> <code>.every(4, rev)</code> <code>.sometimes(…)</code> <code>.degradeBy(.3)</code> <code>.jux(rev)</code> and <code>&lt;a b&gt;</code> <code>[a b]</code> <code>a*2</code> <code>a(3,8)</code> mini-notation.</p>
       <p>Name a track with a label: <code>groove: drums(…)</code>. Start a line with <code>_</code> to mute it.</p>
-      <p class="keys"><kbd>Ctrl/⌘ Enter</kbd> play/update · <kbd>Ctrl/⌘ .</kbd> stop</p>
+      <p class="keys"><kbd>Ctrl/⌘ Enter</kbd> play/update · <kbd>Ctrl/⌘ .</kbd> stop · <kbd>Ctrl/⌘ K</kbd> command palette</p>
+      <p class="keys"><kbd>Alt N</kbd> / <kbd>Alt P</kbd> select the next / previous number (then type a new one, drag its slider, or turn a MIDI knob) · the small slider after a number edits it live</p>
     </aside>
     </div>
   </main>

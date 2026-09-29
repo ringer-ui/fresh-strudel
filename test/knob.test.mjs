@@ -49,3 +49,17 @@ test('a new target starts from its own value (no jump)', () => {
   k.turn(65, { from: 1, value: 0.2, spec: { lo: 0, hi: 1, step: 0.01 } });
   assert.equal(k.turn(65, { from: 20, value: 0.9, spec: { lo: 0, hi: 1, step: 0.01 } }), '0.91');
 });
+
+import { numberSpots, stepSpot } from '../src/knob.js';
+test('next / previous number: parameters outside strings, wrapping around', () => {
+  const code = 'tempo(110)\nbass("0 3 5", { vol: .5 }).lpf(400) // 999\nx.room(0.3)';
+  const spots = numberSpots(code);
+  assert.deepEqual(spots.map((s) => code.slice(s.from, s.to)), ['110', '.5', '400', '0.3']);      // not the digits in the string, not the comment
+  const at = (i) => spots[i];
+  assert.deepEqual(stepSpot(spots, 0, 0, 1), spots[0]);                                          // from the top: the first
+  assert.deepEqual(stepSpot(spots, at(0).from, at(0).to, 1), spots[1]);                          // from a selected number: the next one
+  assert.deepEqual(stepSpot(spots, at(3).from, at(3).to, 1), spots[0]);                          // wraps
+  assert.deepEqual(stepSpot(spots, at(2).from, at(2).to, -1), spots[1]);
+  assert.deepEqual(stepSpot(spots, 0, 0, -1), spots[3]);                                         // wraps backwards
+  assert.equal(stepSpot([], 0, 0, 1), null);
+});

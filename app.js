@@ -7,7 +7,7 @@ import { createEditor } from './src/editor.js';
 import { mountVisual } from './src/VisualPanel.jsx';
 import { mountHistory } from './src/HistoryPanel.jsx';
 import { createMidiKnob } from './src/midi-knob.js';
-import { createVisuals } from './src/viz.js';
+import { createVisuals, createInlineViz } from './src/viz.js';
 import { createSession } from './src/session.js';
 import { numberAt } from './src/knob.js';
 import { createDock, applyTheme, THEMES, makeVerticalResizer } from './src/workspace.js';
@@ -89,7 +89,7 @@ function describeSelection() {
   if (n) return `the number ${n.name ? n.name + ' = ' : ''}${code.slice(n.from, n.to)}${where}`;
   return track ? `the cursor is in track "${track}"` : '';
 }
-const SOURCE_LINE = { typing: 'you typed', visual: 'you used the visual editor', knob: 'you turned a MIDI knob', snippet: 'you added a snippet', example: 'you loaded an example', import: 'you opened a file', library: 'you inserted a library example', restore: 'you restored a version', share: 'you opened a shared link' };
+const SOURCE_LINE = { typing: 'you typed', visual: 'you used the visual editor', knob: 'you turned a MIDI knob', slider: 'you moved a slider', snippet: 'you added a snippet', example: 'you loaded an example', import: 'you opened a file', library: 'you inserted a library example', restore: 'you restored a version', share: 'you opened a shared link' };
 let idleSnap = null;
 const snap = (source, extra = {}) => session.snapshot({ code: editor.value, settings: settingsNow(), source, ...extra });
 
@@ -159,10 +159,45 @@ function lightNow() {
 const startLights = () => { if (!lightTimer) lightTimer = setInterval(lightNow, 33); };
 const stopLights = () => { clearInterval(lightTimer); lightTimer = null; editor.highlight([]); };
 
+// Which track a note came from: its location (offset in the code Strudel ran) -> what you typed -> the track whose statement holds it.
+let trackRanges = [];
+const trackAt = (locations) => {                                 // an event has several locations (the label the app added, then the parts you typed): use the first that is yours
+  for (const l of locations ?? []) {
+    const src = toSource(l.start);
+    if (src == null) continue;
+    const r = trackRanges.find((x) => src >= x.start && src < x.end);
+    if (r) return r.name;
+  }
+  return null;
+};
 const visuals = createVisuals({
-  root: $('viz'), store, toMidi: (n) => strudel.noteToMidi(n),
+  root: $('viz'), store, toMidi: (n) => strudel.noteToMidi(n), trackAt,
   getScheduler: () => repl?.scheduler, getCycle: () => audibleCycle(), getAnalyser: () => getAnalyser(),
 });
+const inline = createInlineViz({
+  store, toMidi: (n) => strudel.noteToMidi(n), trackAt,
+  getCanvases: () => editor.inlineCanvases(), getScheduler: () => repl?.scheduler, getCycle: () => audibleCycle(),
+});
+// Put (or take away) the small roll under each audible track's code.
+function placeInline() {
+  if (!playing || !inline.enabled) { editor.setInline([]); return; }
+  const stmts = splitStatements(ranSource), doc = editor.value, list = [];
+  trackRanges = [];
+  for (const t of findTracks(ranSource)) {
+    const st = stmts.find((x) => x.start === t.start);
+    if (!st) continue;
+    trackRanges.push({ name: t.name, start: t.start, end: st.end });
+    if (t.writtenMuted || muted.has(t.name) || (solo.size && !solo.has(t.name))) continue;
+    list.push({ pos: lineEnd(doc, st.end), name: t.name });                      // under the last line of the track's statement
+  }
+  editor.setInline(list);
+}
+const lineEnd = (doc, pos) => { const i = doc.indexOf('\n', Math.max(0, pos - 1)); return i < 0 ? doc.length : i; };
+$('opt-inline').checked = inline.enabled;
+$('opt-inline').addEventListener('change', (e) => { inline.setEnabled(e.target.checked); placeInline(); });
+let slidersOn = store.get('sliders', '1') !== '0';
+$('opt-sliders').checked = slidersOn; editor.setSliders(slidersOn);
+$('opt-sliders').addEventListener('change', (e) => { slidersOn = e.target.checked; store.set('sliders', slidersOn ? '1' : '0'); editor.setSliders(slidersOn); });
 
 // ---- running ----
 // Returns true when the code evaluated without error.
@@ -186,7 +221,7 @@ async function run() {
   }
   if (evalFailed) return false;   // Strudel reports eval errors through onEvalError instead of throwing
   playing = true;
-  startLights(); visuals.setPlaying(true);
+  startLights(); visuals.setPlaying(true); inline.setPlaying(true); placeInline();
   if (!playingSince) { playingSince = Date.now(); session.record('play', 'you pressed play'); }
   if (!liveRunning) snap('typing', { label: 'played' });          // live re-runs from knobs and the visual editor don't each make a version
   try {
@@ -254,7 +289,7 @@ function stop() {
   strudel.resetGlobalEffects?.();   // clears reverb/delay tails
   setMaster(0);
   playing = false;
-  stopLights(); visuals.setPlaying(false);
+  stopLights(); visuals.setPlaying(false); inline.setPlaying(false); editor.setInline([]);
   if (playingSince) session.record('stop', `you stopped it after ${Math.round((Date.now() - playingSince) / 1000)}s`);
   playingSince = null;
   setStatus('Stopped.');
@@ -358,6 +393,7 @@ $('import').addEventListener('change', async (e) => {
 
 let mixTimer;
 function onInput(source = 'typing') {
+  if (source === 'slider') liveEdited();                          // an inline slider: hear it right away
   if (!['claude', 'undo', 'restore', 'library'].includes(source)) session.record('edit', SOURCE_LINE[source] ?? source, { source });      // Claude's and undo have their own lines from the chat
   clearTimeout(idleSnap); idleSnap = setTimeout(() => snap(source === 'typing' ? 'typing' : source), 15000);     // a version once you pause (plays and chat changes make their own)
   if (!barLocksHeld()) lock.bpm = lock.key = false;         // while something external drives the top bar, edits don't hand it back
@@ -503,6 +539,10 @@ const palette = createPalette({
     { title: 'Save the song as a scene…', hint: 'scene', run: () => { const n = prompt('Scene name'); if (n) session.saveScene({ code: editor.value, settings: settingsNow(), name: n }); } },
     ...session.versions.slice(-8).reverse().map((v) => ({ title: `Restore v${v.id}${v.label ? `: ${v.label}` : ''}`, hint: 'history', keywords: 'version undo back', run: () => applyVersion(v, 'restore') })),
     ...Object.keys(EXAMPLES).map((n) => ({ title: `Example: ${n}`, hint: 'example', run: () => { el.examples.value = n; el.examples.dispatchEvent(new Event('change')); } })),
+    { title: 'Select the next number', hint: 'Alt N', keywords: 'variable parameter jump', run: () => editor.jumpNumber(1) },
+    { title: 'Select the previous number', hint: 'Alt P', keywords: 'variable parameter jump', run: () => editor.jumpNumber(-1) },
+    { title: `Inline visuals: ${inline.enabled ? 'turn off' : 'turn on'}`, hint: 'look', run: () => $('opt-inline').click() },
+    { title: `Inline sliders: ${slidersOn ? 'turn off' : 'turn on'}`, hint: 'look', run: () => $('opt-sliders').click() },
     { title: 'Faster (+5 BPM)', hint: 'tempo', run: () => { el.bpm.value = Math.min(220, Number(el.bpm.value) + 5); el.bpm.dispatchEvent(new Event('input')); } },
     { title: 'Slower (−5 BPM)', hint: 'tempo', run: () => { el.bpm.value = Math.max(40, Number(el.bpm.value) - 5); el.bpm.dispatchEvent(new Event('input')); } },
     { title: 'Save the song as a file', hint: 'file', run: () => $('export').click() }, { title: 'Copy a share link', hint: 'file', run: () => $('share').click() },
