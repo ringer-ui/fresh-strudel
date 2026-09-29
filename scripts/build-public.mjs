@@ -9,6 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { buildApp } from './build-app.mjs';
+import { BANNED_PATH } from './banned.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.resolve(process.env.STRUDEL_EASY_OUT ?? path.join(root, 'dist'));   // tests build elsewhere, so they never touch dist/
@@ -134,6 +135,7 @@ const problems = [];
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));
 const built = walk(out);
 for (const f of built) {
+  if (BANNED_PATH.test(path.relative(out, f))) problems.push(`${path.relative(out, f)}: collected third-party code or a corpus database`);
   const text = fs.readFileSync(f, 'utf8');
   for (const [re, what] of FORBIDDEN) {
     const m = text.match(re);

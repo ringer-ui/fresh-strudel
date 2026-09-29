@@ -207,3 +207,6 @@ main.dock-left .dock-handle { left: auto; right: -3px; }
 
 .viz-opts { margin-left: auto; display: flex; gap: 12px; }
 .viz-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+.lib-flag { color: var(--warn); font-size: 11px; }
+.lib-used { opacity: .75; }

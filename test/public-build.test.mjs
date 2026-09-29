@@ -70,3 +70,20 @@ test('every script and stylesheet the page loads is in the build, and the import
   assert.ok(html.includes(`'sha256-${createHash('sha256').update(map[1]).digest('base64')}'`), 'CSP hash does not match the import map');
   assert.ok(html.indexOf('type="importmap"') < html.indexOf('type="module"'), 'the import map must come before the module script');
 });
+
+test('collected third-party code and corpus databases can never be published', async () => {
+  const { BANNED_PATH } = await import('../scripts/banned.mjs');
+  for (const p of ['strudelstore/README.md', 'strudelstore/licensed/x/a.strudel', 'corpus.licensed.db', 'corpus.all.db', 'x/corpus.db-wal', 'data.sqlite', 'a/b/c.db']) assert.ok(BANNED_PATH.test(p), `${p} must be banned`);
+  for (const p of ['src/editor.js', 'index.html', 'vendor/strudel-web.js', 'docs/ROADMAP.md']) assert.ok(!BANNED_PATH.test(p), `${p} must be allowed`);
+  for (const f of files()) {
+    assert.ok(!BANNED_PATH.test(f), `${f} is in the public build`);
+    assert.ok(!/strudelstore/.test(fs.readFileSync(path.join(dist, f), 'utf8')), `${f} mentions the collected store`);
+  }
+  // the source export (only present in the private repo): run it into a temp folder and look at what came out
+  if (!fs.existsSync(path.join(root, 'scripts/export-public-source.mjs'))) return;
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'strudel-easy-export-'));
+  execFileSync('node', ['scripts/export-public-source.mjs', out], { cwd: root, stdio: 'pipe' });
+  const exported = fs.readdirSync(out, { recursive: true }).map(String).filter((f) => !/^node_modules/.test(f));
+  assert.ok(exported.length > 20 && !exported.some((f) => BANNED_PATH.test(f)), 'the export contains a banned path');
+  assert.match(fs.readFileSync(path.join(out, '.gitignore'), 'utf8'), /strudelstore\/[\s\S]*\*\.db/);
+});

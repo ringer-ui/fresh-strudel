@@ -3,3 +3,7 @@ dist/
 app-dist/
 .build/
 .DS_Store
+strudelstore/
+*.db
+*.db-wal
+*.db-shm
