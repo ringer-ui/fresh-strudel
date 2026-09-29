@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strudel Easy</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ccircle cx=%278%27 cy=%278%27 r=%277%27 fill=%27%23ff7a59%27/%3E%3C/svg%3E">
+  <!-- General-MIDI (gm_*) soundfonts: the official package, pointed at the Strudel bundle (vendor/), which is loaded by URL, not bundled -->
+  <script type="importmap">{"imports":{"@strudel/core":"./vendor/shim-core.mjs","@strudel/webaudio":"./vendor/shim-webaudio.mjs","sfumato":"https://esm.sh/sfumato@0.1.2?bundle"}}</script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="brand">strudel<span>easy</span></div>
+
+    <button id="play" class="primary" title="Play / update (Ctrl or Cmd + Enter)">&#9654; Play</button>
+    <button id="stop" title="Stop (Ctrl or Cmd + .)">&#9632; Stop</button>
+
+    <label class="ctl">BPM
+      <input id="bpm" type="range" min="40" max="220" step="0.1" value="120">
+      <output id="bpm-out">120</output>
+    </label>
+
+    <label class="ctl">Key
+      <select id="key-root"></select>
+      <select id="key-mode"></select>
+    </label>
+
+    <label class="ctl">Drum kit
+      <select id="bank"><option value="">loading…</option></select>
+    </label>
+
+    <div id="beats" class="beats" aria-label="beat">
+      <i></i><i></i><i></i><i></i>
+    </div>
+
+    <span class="spacer"></span>
+
+    <select id="examples" title="Examples"><option value="">Examples…</option></select>
+    <button id="chat-toggle" title="Ask Claude to change the song">Chat</button>
+    <button id="snippets-toggle" title="Ready-made parts to add">Snippets</button>
+    <button id="export" title="Download as a .strudel file">Save</button>
+    <label class="btn" title="Open a .strudel / .js / .txt file">Open<input id="import" type="file" accept=".strudel,.js,.txt" hidden></label>
+    <button id="share" title="Copy a link to this song">Share</button>
+    <button id="help-toggle" title="Cheat sheet">?</button>
+  </header>
+
+  <div id="mixer" class="mixer" aria-label="Tracks"></div>
+
+  <main>
+    <section class="editor-wrap">
+      <div id="code" class="code"></div>
+      <pre id="error" class="error" hidden></pre>
+      <div id="status" class="status">Loading Strudel…</div>
+    </section>
+
+
+    <aside id="chat" class="help chat" hidden>
+      <div class="chat-head"><h2>Chat</h2><span class="spacer"></span>
+<select id="chat-model" title="Which Claude model writes the changes" aria-label="Model"></select><button id="chat-undo" title="Undo the last AI change" disabled>Undo</button><button id="chat-clear" title="Start a new conversation">Clear</button></div>
+      <div id="chat-key" class="chat-key" hidden>
+        <p>Chat uses your own Anthropic API key. It stays in this browser and is sent only to api.anthropic.com. Use a key with a spending limit.</p>
+        <div class="key-row"><input id="key-input" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button id="key-save">Save</button><button id="key-clear" hidden>Forget</button></div>
+        <label class="key-remember"><input id="key-remember" type="checkbox"> Keep it in this browser across reloads (otherwise it is forgotten when you reload)</label>
+        <p id="key-status" class="key-status" role="status"></p>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <div class="chat-input"><textarea id="chat-input" rows="2" placeholder="Ask for a change…"></textarea><button id="chat-send" class="primary">Send</button></div>
+    </aside>
+
+    <aside id="snippets" class="help snippets" hidden>
+      <h2>Snippets</h2>
+      <p class="note">Click to add a part as a new track. <b>Effects</b> attach to the line your cursor is on. Hover for the code.</p>
+    </aside>
+
+    <aside id="help" class="help" hidden>
+      <h2>Cheat sheet</h2>
+      <p class="note">The bar at the top sets the defaults (BPM, key, drum kit). <code>tempo()</code> and <code>key()</code> in your code override them.</p>
+
+      <h3>Instruments</h3>
+      <p>Each one starts a track. Chain any Strudel method after it.</p>
+      <dl>
+        <dt>drums("kick ~ snare ~")</dt><dd>kick snare hat openhat clap rim tom crash ride</dd>
+        <dt>drums({ kick: "x...x...", … })</dt><dd>step grid, 16 steps = 1 bar, no spaces in a row. <code>x</code> hit · <code>X</code> accent · <code>o</code> ghost · <code>.</code> rest</dd>
+        <dt>bass("0 ~ ~ 0 ~ -2 ~ 3")</dt><dd>numbers are notes of your key (0 = root); <code>~</code> is a rest. Note names like <code>c2 eb2</code> work too</dd>
+        <dt>chords("&lt;Cm7 Fm7&gt;")</dt><dd>chord names, voiced for you</dd>
+        <dt>pad("&lt;Cm7 Fm7&gt;")</dt><dd>slow, soft, reverby chords</dd>
+        <dt>lead("~ ~ 4 ~ ~ 2 ~ 0")</dt><dd>melody, an octave up, with a little echo</dd>
+      </dl>
+
+      <h3>Options</h3>
+      <p>Second argument: <code>bass("0 3", { vol: .5, filter: 300 })</code></p>
+      <dl>
+        <dt>vol</dt><dd>0–1 loudness</dd>
+        <dt>pan</dt><dd>0 left · .5 centre · 1 right</dd>
+        <dt>filter / hipass</dt><dd>low-pass / high-pass cutoff in Hz</dd>
+        <dt>reverb · delay</dt><dd>0–1 amount</dd>
+        <dt>sound</dt><dd>sawtooth, square, triangle, sine, or a sample name</dd>
+        <dt>octave</dt><dd>bass and lead only</dd>
+        <dt>attack · release</dt><dd>seconds</dd>
+        <dt>bank</dt><dd>drums only, e.g. "RolandTR808"</dd>
+      </dl>
+      <p>Any other Strudel control works too: <code>{ crush: 4 }</code>.</p>
+
+      <h3>Chain shortcuts</h3>
+      <dl>
+        <dt>.vol(x) .hipass(x) .reverb(x)</dt><dd>same as the options</dd>
+        <dt>.bars(n)</dt><dd>stretch over n bars (<code>.slow</code>)</dd>
+        <dt>.sweep(200, 4000, 8)</dt><dd>filter opens and closes over 8 bars</dd>
+        <dt>.humanize()</dt><dd>loosen the timing</dd>
+      </dl>
+
+      <h3>Paste any Strudel song</h3>
+      <p>Songs from the Strudel REPL run here too: <code>$:</code> and <code>$name:</code> tracks, <code>setcpm()</code>, <code>gm_*</code> instruments and drum-machine names. Visualisers like <code>._pianoroll()</code> and <code>slider()</code> are accepted but not drawn.</p>
+
+      <h3>Everything else</h3>
+      <p>All of Strudel works: <code>.fast(2)</code> <code>.every(4, rev)</code> <code>.sometimes(…)</code> <code>.degradeBy(.3)</code> <code>.jux(rev)</code> and <code>&lt;a b&gt;</code> <code>[a b]</code> <code>a*2</code> <code>a(3,8)</code> mini-notation.</p>
+      <p>Name a track with a label: <code>groove: drums(…)</code>. Start a line with <code>_</code> to mute it.</p>
+      <p class="keys"><kbd>Ctrl/⌘ Enter</kbd> play/update · <kbd>Ctrl/⌘ .</kbd> stop</p>
+    </aside>
+  </main>
+
+  <script src="vendor/strudel-web.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

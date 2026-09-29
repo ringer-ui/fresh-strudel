@@ -1,0 +1,30 @@
+{
+  "name": "strudel-easy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A friendlier front end for Strudel live coding (static web app)",
+  "scripts": {
+    "build": "node scripts/build-public.mjs",
+    "preview": "node scripts/serve-public.mjs",
+    "test": "node --import ./test/setup.mjs --test test/"
+  },
+  "dependencies": {
+    "preact": "^10",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
+    "@codemirror/commands": "^6",
+    "@codemirror/language": "^6",
+    "@codemirror/autocomplete": "^6",
+    "@codemirror/lang-javascript": "^6",
+    "@codemirror/lint": "^6",
+    "@lezer/highlight": "^1"
+  },
+  "devDependencies": {
+    "@strudel/core": "1.2.6",
+    "@strudel/mini": "1.2.6",
+    "@strudel/tonal": "1.2.6",
+    "vite": "^8",
+    "@preact/preset-vite": "^2"
+  }
+}
