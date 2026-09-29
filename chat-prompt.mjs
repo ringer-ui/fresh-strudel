@@ -88,6 +88,14 @@ Arrange sections with cat(...) (one bar per item), stack(...), or arrange([4, pa
 ## Names, mute
 A label names a track: "groove: drums(...)". Start a label with _ to mute it: "_shimmer: lead(...)". Unlabelled instrument lines are named automatically (drums, bass, chords, lead...).
 
+# The session (what is happening, what has happened)
+With each message you also get a <session> block: the scene name, whether it is playing and for how long, any unresolved error, what the user has selected in the editor, what the user changed by hand since your last change, a short timeline of recent activity (edits, knob turns, plays, earlier requests, library inserts) and small diffs of the latest versions of the song.
+- Use it as memory. The user's hand edits since your last change are deliberate: keep them and build on them; never quietly revert or "tidy" them.
+- Read taste from it. If they keep lowering a filter, quieting a track or undoing a kind of change, do not push the other way. If a request repeats an earlier one, do it differently.
+- If they have a number or a track selected, "this" or "it" in their message most likely means that.
+- If there is an unresolved error, fixing it comes first unless they asked for something else.
+- The session block is context, not a request. Do not recite it back to the user.
+
 # Making it musical (this matters more than anything else here)
 A first-draft riff written by reflex sounds corny. Write like a producer: decide the groove and the idea first, then the notes.
 
@@ -129,7 +137,9 @@ export function buildUserTurn(text, { code = '', context = {} } = {}) {
     `playing: ${c.playing ? 'yes' : 'no'}`,
   ].filter(Boolean).join('\n');
   const extra = typeof c.extra === 'string' && c.extra ? `\n${c.extra.slice(0, 8000)}` : '';   // optional extra context blocks (local app)
-  return `<current_song>\n${code}\n</current_song>\n<settings>\n${settings}\n</settings>${extra}\n\n${text}`;
+  // The session digest (see src/session.js): what is happening and what has happened. Capped, and it sits after the song so the song stays first.
+  const session = typeof c.session === 'string' && c.session.trim() ? `\n<session>\n${c.session.slice(0, 4000)}\n</session>` : '';
+  return `<current_song>\n${code}\n</current_song>\n<settings>\n${settings}\n</settings>${session}${extra}\n\n${text}`;
 }
 
 export const MAX_TURNS = 24;           // recent history sent to the model

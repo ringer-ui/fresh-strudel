@@ -39,6 +39,7 @@
     <select id="examples" title="Examples"><option value="">Examples…</option></select>
     <button id="chat-toggle" title="Ask Claude to change the song">Chat</button>
     <button id="visual-toggle" title="Edit drums, notes and knobs by clicking">Visual</button>
+    <button id="history-toggle" title="Scenes, versions, A/B, and what Claude knows about this session">History</button>
     <button id="snippets-toggle" title="Ready-made parts to add">Snippets</button>
     <button id="export" title="Download as a .strudel file">Save</button>
     <label class="btn" title="Open a .strudel / .js / .txt file">Open<input id="import" type="file" accept=".strudel,.js,.txt" hidden></label>
@@ -53,6 +54,7 @@
       <div id="code" class="code"></div>
       <pre id="error" class="error" hidden></pre>
       <div id="viz" class="viz">
+        <div id="viz-resize" class="viz-resize" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
         <div class="viz-bar"><span>Visuals</span>
           <button data-m="roll">Roll</button><button data-m="spectrum">Spectrum</button><button data-m="scope">Scope</button><button data-m="off" title="Hide the visuals">Hide</button>
         </div>
@@ -61,6 +63,7 @@
       <div id="status" class="status">Loading Strudel…</div>
     </section>
 
+    <div id="dock" class="dock" hidden>
 
     <aside id="chat" class="help chat" hidden>
       <div class="chat-head"><h2>Chat</h2><span class="spacer"></span>
@@ -76,6 +79,8 @@
     </aside>
 
     <aside id="visual" class="help visual" hidden aria-label="Visual editors"></aside>
+
+    <aside id="history" class="help history" hidden aria-label="History and scenes"></aside>
 
     <aside id="snippets" class="help snippets" hidden>
       <h2>Snippets</h2>
@@ -127,6 +132,7 @@
       <p>Name a track with a label: <code>groove: drums(…)</code>. Start a line with <code>_</code> to mute it.</p>
       <p class="keys"><kbd>Ctrl/⌘ Enter</kbd> play/update · <kbd>Ctrl/⌘ .</kbd> stop</p>
     </aside>
+    </div>
   </main>
 
   <script src="vendor/strudel-web.js"></script>

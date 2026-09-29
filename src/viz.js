@@ -148,10 +148,12 @@ export function createVisuals({ root, getScheduler, getCycle, getAnalyser, toMid
     root.classList.toggle('collapsed', mode === 'off');
     buttons.forEach((b) => b.classList.toggle('on', b.dataset.m === mode));
   }
-  buttons.forEach((b) => b.addEventListener('click', () => { mode = b.dataset.m; store.set('viz', mode); events = []; cachedFor = null; sync(); }));
+  const setMode = (m) => { mode = m; store.set('viz', mode); events = []; cachedFor = null; sync(); };
+  buttons.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m)));
+  window.addEventListener('themechange', () => { readColors(); if (!timer && mode !== 'off') sync(); });
   document.addEventListener('visibilitychange', sync);
   window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', () => { readColors(); });
   new ResizeObserver(() => { if (!timer && mode !== 'off') sync(); }).observe(canvas);
   sync();
-  return { setPlaying(p) { playing = p; events = []; cachedFor = null; sync(); }, get mode() { return mode; } };
+  return { setMode, setPlaying(p) { playing = p; events = []; cachedFor = null; sync(); }, get mode() { return mode; } };
 }

@@ -37,7 +37,7 @@ async function* serverEvents({ messages, code, context, signal, model,
 
 const SUGGESTIONS = ['Make it faster', 'Add a bassline', 'Make the drums heavier', 'Darker mood', 'More reverb on the lead', 'Swap to an 808 kit'];
 
-export function initChat({ getCode, setCode, getContext, run, isPlaying, getLastError, openPanel }) {
+export function initChat({ getCode, setCode, getContext, run, isPlaying, getLastError, openPanel, session }) {
   const $ = (id) => document.getElementById(id);
   const log = $('chat-log'), input = $('chat-input'), sendBtn = $('chat-send'), undoBtn = $('chat-undo'), clearBtn = $('chat-clear');
 
@@ -79,18 +79,24 @@ export function initChat({ getCode, setCode, getContext, run, isPlaying, getLast
   }
 
   // One request (plus any automatic fix-ups) is one undo step: only the first apply snapshots.
-  function applySong(code, snapshot) {
+  function applySong(code, snapshot, note = {}) {
     if (snapshot) undoStack.push(getCode());
-    setCode(code);
+    session?.snapshot({ code: getCode(), source: 'typing', label: 'before Claude changed it' });      // the state Claude started from (skipped if it is already a version)
+    setCode(code, 'claude');
+    session?.snapshot({ code, source: 'claude', label: note.summary || 'Claude changed the song', sources: note.sources ?? [], force: true });
+    if (note.sources?.length) session?.noteLibrary(note.sources);
+    session?.record('chat', `Claude: ${note.summary || 'changed the song'}${note.sources?.length ? ` (drew on ${note.sources.map((x) => `"${x.title}"`).join(', ')})` : ''}`);
     refreshButtons();
   }
 
   // One request/response cycle. Returns { code, text, error }.
   async function ask(userText, { snapshot = true } = {}) {
     history.push({ role: 'user', content: userText });
+    if (snapshot) { session?.record('chat', `you asked Claude: "${userText.slice(0, 120)}"`); session?.markAsked(getCode()); }
     const msgEl = bubble('assistant');
     msgEl.classList.add('pending');
     let text = '', code = null, summary = '', error = null;
+    let sources = [];                                  // library examples Claude drew on (local app only ever fills this)
 
     abort = new AbortController();
     try {
@@ -110,7 +116,7 @@ export function initChat({ getCode, setCode, getContext, run, isPlaying, getLast
     if (!text) msgEl.remove();
     history.push({ role: 'assistant', content: (text || summary || '(no reply)') + (code ? '\n(I updated the song.)' : '') });
     if (code) {
-      applySong(code, snapshot);
+      applySong(code, snapshot, { summary, sources });
       const note = el('div', 'msg applied', `✓ ${summary || 'Song updated'}`);
       log.append(note);
       scroll();
@@ -151,7 +157,9 @@ export function initChat({ getCode, setCode, getContext, run, isPlaying, getLast
   undoBtn.addEventListener('click', async () => {
     const prev = undoStack.pop();
     if (prev == null) return;
-    setCode(prev);
+    setCode(prev, 'undo');
+    session?.record('chat', 'you undid Claude\'s last change');
+    session?.snapshot({ code: prev, source: 'undo', label: 'undid Claude\'s change' });
     log.append(el('div', 'msg note', 'Undid the last change.')); scroll();
     history.push({ role: 'user', content: '(I undid your last change with the Undo button.)' }, { role: 'assistant', content: 'OK, reverted.' });
     refreshButtons();
@@ -193,5 +201,5 @@ export function initChat({ getCode, setCode, getContext, run, isPlaying, getLast
     sync();
   }
 
-  return { open: openPanel };
+  return { open: openPanel, send };
 }

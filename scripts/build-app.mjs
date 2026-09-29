@@ -16,7 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The browser source. Files that may contain fenced local-only parts (see strip-local.mjs) are listed in FENCED.
 const SOURCE = ['index.html', 'style.css', 'app.js', 'chat.js', 'chat-direct.js', 'chat-prompt.mjs', 'friendly.js', 'preprocess.js', 'examples.js', 'snippets.js'];
 const SOURCE_DIRS = ['src'];                                    // component code (Preact); copied whole if present
-let LOCAL_ONLY = [];
+let LOCAL_ONLY = [], LOCAL_DIRS = [];
 const FENCED = new Set(['index.html', 'app.js', 'chat.js', 'style.css']);
 const FENCED_EXT = /\.(jsx?|tsx?|css|html)$/;
 // Runtime files loaded by URL, not bundled (the Strudel engine is a prebuilt IIFE; soundfonts is loaded lazily against an import map).
@@ -42,7 +42,7 @@ export async function buildApp({ mode, out }) {
   };
   for (const f of SOURCE) put(f);
   if (mode === 'local') for (const f of LOCAL_ONLY) put(f);
-  for (const d of SOURCE_DIRS) if (fs.existsSync(path.join(root, d))) {
+  for (const d of mode === 'local' ? [...SOURCE_DIRS, ...LOCAL_DIRS] : SOURCE_DIRS) if (fs.existsSync(path.join(root, d))) {
     fs.mkdirSync(path.join(stage, d), { recursive: true });
     copyTree(path.join(root, d), path.join(stage, d), (name, buf) => (strip && FENCED_EXT.test(name) ? Buffer.from(stripLocal(buf.toString('utf8'))) : buf));
   }

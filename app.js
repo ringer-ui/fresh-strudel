@@ -1,12 +1,17 @@
 import { installFriendly, KEY_MODES } from './friendly.js';
-import { prepare, findTracks } from './preprocess.js';
+import { prepare, findTracks, splitStatements } from './preprocess.js';
 import { EXAMPLES } from './examples.js';
 import { SNIPPETS } from './snippets.js';
 import { initChat } from './chat.js';
 import { createEditor } from './src/editor.js';
 import { mountVisual } from './src/VisualPanel.jsx';
+import { mountHistory } from './src/HistoryPanel.jsx';
 import { createMidiKnob } from './src/midi-knob.js';
 import { createVisuals } from './src/viz.js';
+import { createSession } from './src/session.js';
+import { numberAt } from './src/knob.js';
+import { createDock, applyTheme, THEMES, makeVerticalResizer } from './src/workspace.js';
+import { createPalette } from './src/palette.js';
 
 const $ = (id) => document.getElementById(id);
 const el = { play: $('play'), stop: $('stop'), bpm: $('bpm'), bpmOut: $('bpm-out'), root: $('key-root'), mode: $('key-mode'),
@@ -25,7 +30,6 @@ const store = {
 
 // ---- state ----
 // Extension points the local app fills in (bottom of this file); the public build never sets them.
-const extraPanels = {};                            // name -> panel element, shown by showPanel
 let barLocksHeld = () => false;                    // true while something external drives the top bar
 let chatExtra = () => undefined;                   // optional extra context blocks for the chat
 let beforeStart = () => {};                        // called just before playback begins from stopped
@@ -65,12 +69,33 @@ const engineNames = () => {
 const getNames = engineNames;                          // read live on each completion (a few ms), so sounds added later (banks, soundfonts, your own) appear
 const editor = createEditor({
   parent: $('code'), doc: shared?.code ?? store.get('code', EXAMPLES['Start here']),
-  onChange: () => onInput(), onRun: () => run(), onStop: () => stop(), getNames,
+  onChange: (source) => onInput(source), onRun: () => run(), onStop: () => stop(), getNames,
 });
 
+// ---- the session: what is happening and what has happened (activity, versions, scenes). Claude sees a digest of it with every message. ----
+const session = createSession({ storage: (() => { try { return localStorage; } catch { return null; } })() });
+const settingsNow = () => ({ bpm: Number(el.bpm.value), root: el.root.value, mode: el.mode.value, bank: el.bank.value || '' });
+let playingSince = null, lastErrorLogged = '';
+const trackAtCursor = () => {                                  // the name of the track the cursor is in, for "the user has selected ..."
+  const cur = editor.cursor(), code = editor.value;
+  const st = splitStatements(code).findLast((x) => x.start <= cur);
+  return st ? findTracks(code).find((t) => t.start === st.start)?.name ?? null : null;
+};
+function describeSelection() {
+  const { from, to } = editor.selection(), code = editor.value, track = trackAtCursor();
+  const where = track ? ` in track "${track}"` : '';
+  if (to > from && to - from <= 80) return `"${code.slice(from, to).replace(/\s+/g, ' ')}"${where}`;
+  const n = numberAt(code, from, to);
+  if (n) return `the number ${n.name ? n.name + ' = ' : ''}${code.slice(n.from, n.to)}${where}`;
+  return track ? `the cursor is in track "${track}"` : '';
+}
+const SOURCE_LINE = { typing: 'you typed', visual: 'you used the visual editor', knob: 'you turned a MIDI knob', snippet: 'you added a snippet', example: 'you loaded an example', import: 'you opened a file', library: 'you inserted a library example', restore: 'you restored a version', share: 'you opened a shared link' };
+let idleSnap = null;
+const snap = (source, extra = {}) => session.snapshot({ code: editor.value, settings: settingsNow(), source, ...extra });
+
 const setStatus = (msg) => { el.status.textContent = msg; };
-const showError = (err) => { lastError = String(err?.message ?? err); el.error.hidden = false; el.error.textContent = lastError; editor?.setError(lastError); };
-const hideError = () => { lastError = ''; el.error.hidden = true; el.error.textContent = ''; editor?.setError(null); };
+const showError = (err) => { lastError = String(err?.message ?? err); if (lastError !== lastErrorLogged) { lastErrorLogged = lastError; session.record('error', `an error came up: ${lastError.split('\n')[0].slice(0, 160)}`); } el.error.hidden = false; el.error.textContent = lastError; editor?.setError(lastError); };
+const hideError = () => { lastError = ''; lastErrorLogged = ''; el.error.hidden = true; el.error.textContent = ''; editor?.setError(null); };
 const currentKey = () => `${el.root.value} ${el.mode.value.replace(':', ' ')}`;
 
 // ---- mixer (mute / solo chips built from the code) ----
@@ -162,6 +187,8 @@ async function run() {
   if (evalFailed) return false;   // Strudel reports eval errors through onEvalError instead of throwing
   playing = true;
   startLights(); visuals.setPlaying(true);
+  if (!playingSince) { playingSince = Date.now(); session.record('play', 'you pressed play'); }
+  if (!liveRunning) snap('typing', { label: 'played' });          // live re-runs from knobs and the visual editor don't each make a version
   try {
     const ctx = strudel.getAudioContext();
     if (ctx.state !== 'running') await ctx.resume();          // browsers keep audio locked until a click
@@ -228,6 +255,8 @@ function stop() {
   setMaster(0);
   playing = false;
   stopLights(); visuals.setPlaying(false);
+  if (playingSince) session.record('stop', `you stopped it after ${Math.round((Date.now() - playingSince) / 1000)}s`);
+  playingSince = null;
   setStatus('Stopped.');
 }
 
@@ -241,39 +270,57 @@ el.bpm.addEventListener('input', () => { lock.bpm = true; el.bpmOut.textContent 
 el.root.addEventListener('change', () => { lock.key = true; store.set('root', el.root.value); rerunSoon(); });
 el.mode.addEventListener('change', () => { lock.key = true; store.set('mode', el.mode.value); rerunSoon(); });
 el.bank.addEventListener('change', () => { store.set('bank', el.bank.value); rerunSoon(); });
-const snippetsEl = $('snippets');
-const chatEl = $('chat');
-const visualEl = $('visual');
-function showPanel(which) {   // 'help' | 'snippets' | 'chat' | 'pj' | null
-  el.help.hidden = which !== 'help';
-  for (const [name, node] of Object.entries(extraPanels)) node.hidden = which !== name;
-  chatEl.hidden = which !== 'chat';
-  visualEl.hidden = which !== 'visual';
-  snippetsEl.hidden = which !== 'snippets';
-  store.set('panel', which ?? 'none');
-}
-el.helpToggle.addEventListener('click', () => showPanel(el.help.hidden ? 'help' : null));
-$('chat-toggle').addEventListener('click', () => showPanel(chatEl.hidden ? 'chat' : null));
-$('visual-toggle').addEventListener('click', () => showPanel(visualEl.hidden ? 'visual' : null));
-$('snippets-toggle').addEventListener('click', () => showPanel(snippetsEl.hidden ? 'snippets' : null));
-showPanel(store.get('panel', 'help') === 'none' ? null : store.get('panel', 'help'));
+const snippetsEl = $('snippets'), chatEl = $('chat'), visualEl = $('visual'), historyEl = $('history');
+// Panels live in the dock (workspace.js): several can be open at once, resized, collapsed, and moved to either side.
+applyTheme(store.get('theme', 'system'));
+const toolbar = { help: el.helpToggle, chat: $('chat-toggle'), visual: $('visual-toggle'), history: $('history-toggle'), snippets: $('snippets-toggle') };
+let dock = null;
+const syncToolbar = () => { if (!dock) return; for (const [name, b] of Object.entries(toolbar)) { const on = dock.isOpen(name); b.classList.toggle('panel-on', on); b.setAttribute('aria-pressed', String(on)); } };
+dock = createDock({ root: $('dock'), store, onChange: () => syncToolbar() });
+dock.register('help', el.help, 'Cheat sheet'); dock.register('chat', chatEl, 'Chat'); dock.register('visual', visualEl, 'Visual editors');
+dock.register('history', historyEl, 'History and scenes'); dock.register('snippets', snippetsEl, 'Snippets');
+for (const [name, b] of Object.entries(toolbar)) b.addEventListener('click', () => dock.toggle(name));
+syncToolbar();
+makeVerticalResizer({ handle: $('viz-resize'), target: $('viz'), prop: '--viz-h', min: 80, max: 520, store, key: 'viz-h' });
 
 // Visual editors: every click/drag is an exact text edit in the editor; if the song is playing the change is heard right away.
 // Re-runs at most ~6 times a second, one at a time (a knob sends far more than that).
-let liveTimer, liveLast = 0, liveBusy = false, liveAgain = false;
+let liveTimer, liveLast = 0, liveBusy = false, liveAgain = false, liveRunning = false;
 async function liveRun() {
   if (!playing) return;
   if (liveBusy) { liveAgain = true; return; }
   liveBusy = true; liveLast = performance.now();
-  try { await run(); } finally { liveBusy = false; if (liveAgain) { liveAgain = false; liveEdited(); } }
+  liveRunning = true;
+  try { await run(); } finally { liveRunning = false; liveBusy = false; if (liveAgain) { liveAgain = false; liveEdited(); } }
 }
 function liveEdited() { clearTimeout(liveTimer); liveTimer = setTimeout(liveRun, Math.max(0, 160 - (performance.now() - liveLast))); }
 const midi = createMidiKnob({ editor, onEdited: liveEdited });
 mountVisual(visualEl, { editor, onEdited: liveEdited, midi });
 
+// History and scenes. Restoring or switching always keeps the song you had (as a version) first, so nothing is ever lost.
+function applyVersion(v, source = 'restore', { quiet = false } = {}) {
+  if (!quiet) snap('typing', { label: 'before restore' });
+  const st = v.settings ?? {};
+  if (st.bpm) { el.bpm.value = st.bpm; el.bpmOut.textContent = st.bpm; }
+  if (st.root) el.root.value = st.root;
+  if (st.mode) el.mode.value = st.mode;
+  if (st.bank != null && [...el.bank.options].some((o) => o.value === st.bank)) el.bank.value = st.bank;
+  muted.clear(); solo.clear();
+  editor.setValue(v.code);
+  onInput('restore');
+  if (!quiet) session.record('restore', `you ${source === 'scene' ? `switched to scene "${v.name}"` : `restored v${v.id}${v.label ? ` (${v.label})` : ''}`}`);
+  renderMixer();
+  if (playing) run();
+}
+mountHistory(historyEl, {
+  session, apply: applyVersion,
+  current: () => ({ code: editor.value, settings: settingsNow() }),
+  digest: () => session.digest({ code: editor.value, playing, playingSince, error: lastError, selection: describeSelection() }),
+});
+
 // Snippet library: whole parts (Drums, Bass, ...) are added as a new track; Effects go on the end of the line you're on.
 function addSnippet(category, code) {
-  if (category === 'Effects') editor.insertAtLineEnd(code); else editor.append(code);   // both fire onChange (save, mixer)
+  if (category === 'Effects') editor.insertAtLineEnd(code, 'snippet'); else editor.append(code, 'snippet');   // both fire onChange (save, mixer)
   if (playing) run();
 }
 for (const [category, items] of Object.entries(SNIPPETS)) {
@@ -298,14 +345,17 @@ $('export').addEventListener('click', () => {
 $('import').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
+  snap('typing');                                  // keep what was there
   editor.setValue(await file.text());
   e.target.value = '';
   muted.clear(); solo.clear();
-  onInput();
+  onInput('import');
 });
 
 let mixTimer;
-function onInput() {
+function onInput(source = 'typing') {
+  if (!['claude', 'undo', 'restore', 'library'].includes(source)) session.record('edit', SOURCE_LINE[source] ?? source, { source });      // Claude's and undo have their own lines from the chat
+  clearTimeout(idleSnap); idleSnap = setTimeout(() => snap(source === 'typing' ? 'typing' : source), 15000);     // a version once you pause (plays and chat changes make their own)
   if (!barLocksHeld()) lock.bpm = lock.key = false;         // while something external drives the top bar, edits don't hand it back
   store.set('code', editor.value);
   clearTimeout(mixTimer);
@@ -336,7 +386,9 @@ el.examples.addEventListener('change', async () => {
   const known = [...Object.values(EXAMPLES), ...(await Promise.all(songCache.values()))];
   if (!known.includes(editor.value) && editor.value.trim() && !confirm('Replace what you have with this example?')) return;
   muted.clear(); solo.clear(); lock.bpm = lock.key = false;
+  snap('typing');                                  // keep what was there
   editor.setValue(text);
+  onInput('example');
   store.set('code', editor.value);
   renderMixer();
   if (playing) run();
@@ -419,16 +471,40 @@ async function boot() {
   requestAnimationFrame(tick);
 }
 
-initChat({
+const chatApi = initChat({
   getCode: () => editor.value,
-  setCode: (code) => { editor.setValue(code); onInput(); },   // 'input' saves, refreshes the mixer, hands tempo/key back to the code
+  setCode: (code, source) => { editor.setValue(code); onInput(source ?? 'typing'); },   // 'input' saves, refreshes the mixer, hands tempo/key back to the code
   getContext: () => ({
     bpm: Number(el.bpm.value), key: currentKey(), bank: el.bank.value || null, playing,
     tracks: findTracks(editor.value).map((t) => t.name), muted: [...muted], solo: [...solo],
     extra: chatExtra(),
+    session: session.digest({ code: editor.value, playing, playingSince, error: lastError, selection: describeSelection() }),
+    libraryUsed: session.used.map((u) => u.id).filter(Number.isFinite),
   }),
+  session,
   run, isPlaying: () => playing, getLastError: () => lastError,
 });
+
+// ---- command palette (Cmd/Ctrl+K). Anything that isn't a command can be sent straight to Claude. ----
+const askClaude = (text) => { dock.open('chat'); chatApi.send(text); };
+const palette = createPalette({
+  onAsk: askClaude,
+  getCommands: () => [
+    { title: 'Play / update', hint: '⌘↵', run: () => run() }, { title: 'Stop', hint: '⌘.', run: () => stop() },
+    ...dock.titles().map(({ name, title }) => ({ title: `${dock.isOpen(name) ? 'Close' : 'Open'} ${title}`, hint: 'panel', keywords: 'panel toggle show hide dock', run: () => dock.toggle(name) })),
+    { title: `Move the panels to the ${dock.side === 'left' ? 'right' : 'left'}`, hint: 'layout', keywords: 'dock side', run: () => dock.setSide(dock.side === 'left' ? 'right' : 'left') },
+    ...Object.entries(THEMES).map(([k, v]) => ({ title: `Theme: ${v}`, hint: 'look', run: () => { store.set('theme', k); applyTheme(k); } })),
+    ...[['roll', 'Piano roll'], ['spectrum', 'Spectrum'], ['scope', 'Scope'], ['off', 'Hide']].map(([m, t]) => ({ title: `Visuals: ${t}`, hint: 'look', run: () => visuals.setMode(m) })),
+    ...session.scenes.map((v) => ({ title: `Scene: ${v.name}`, hint: 'scene', run: () => applyVersion(v, 'scene') })),
+    { title: 'Save the song as a scene…', hint: 'scene', run: () => { const n = prompt('Scene name'); if (n) session.saveScene({ code: editor.value, settings: settingsNow(), name: n }); } },
+    ...session.versions.slice(-8).reverse().map((v) => ({ title: `Restore v${v.id}${v.label ? `: ${v.label}` : ''}`, hint: 'history', keywords: 'version undo back', run: () => applyVersion(v, 'restore') })),
+    ...Object.keys(EXAMPLES).map((n) => ({ title: `Example: ${n}`, hint: 'example', run: () => { el.examples.value = n; el.examples.dispatchEvent(new Event('change')); } })),
+    { title: 'Faster (+5 BPM)', hint: 'tempo', run: () => { el.bpm.value = Math.min(220, Number(el.bpm.value) + 5); el.bpm.dispatchEvent(new Event('input')); } },
+    { title: 'Slower (−5 BPM)', hint: 'tempo', run: () => { el.bpm.value = Math.max(40, Number(el.bpm.value) - 5); el.bpm.dispatchEvent(new Event('input')); } },
+    { title: 'Save the song as a file', hint: 'file', run: () => $('export').click() }, { title: 'Copy a share link', hint: 'file', run: () => $('share').click() },
+  ],
+});
+
 
 
 boot();

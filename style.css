@@ -1,12 +1,20 @@
 :root {
+  color-scheme: dark;
   --bg: #14161a; --panel: #1c1f25; --line: #2c313a; --text: #e6e8ec; --dim: #8b93a1;
   --accent: #ff7a59; --accent-2: #5ad1a8; --err: #ff6b6b; --warn: #f2c14e;
   --syn-kw: #c792ea; --syn-str: #a5d6a7; --syn-num: #f2c14e; --syn-note: #ff9a80; --syn-op: #7fb7ff; --syn-br: #b39ddb; --syn-fn: #82aaff; --syn-prop: #82aaff;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
+/* Light: when the system asks for it (and no theme is chosen), or when chosen */
 @media (prefers-color-scheme: light) {
-  :root { --syn-kw: #7b3fb5; --syn-str: #2e7d32; --syn-num: #a06a00; --syn-note: #c2410c; --syn-op: #1d5fbf; --syn-br: #6a4bb0; --syn-fn: #1f4fb8; --syn-prop: #1f4fb8; --bg: #f6f6f3; --panel: #ffffff; --line: #dcdcd6; --text: #1d2026; --dim: #6b7280; --accent: #e5533a; --accent-2: #14906c; --err: #c62828; --warn: #a06a00; }
+  :root:not([data-theme]) { color-scheme: light; --syn-kw: #7b3fb5; --syn-str: #2e7d32; --syn-num: #a06a00; --syn-note: #c2410c; --syn-op: #1d5fbf; --syn-br: #6a4bb0; --syn-fn: #1f4fb8; --syn-prop: #1f4fb8; --bg: #f6f6f3; --panel: #ffffff; --line: #dcdcd6; --text: #1d2026; --dim: #6b7280; --accent: #e5533a; --accent-2: #14906c; --err: #c62828; --warn: #a06a00; }
 }
+:root[data-theme="light"] { color-scheme: light; --syn-kw: #7b3fb5; --syn-str: #2e7d32; --syn-num: #a06a00; --syn-note: #c2410c; --syn-op: #1d5fbf; --syn-br: #6a4bb0; --syn-fn: #1f4fb8; --syn-prop: #1f4fb8; --bg: #f6f6f3; --panel: #ffffff; --line: #dcdcd6; --text: #1d2026; --dim: #6b7280; --accent: #e5533a; --accent-2: #14906c; --err: #c62828; --warn: #a06a00; }
+:root[data-theme="dark"] { color-scheme: dark; }
+/* High contrast: pure black and white, strong borders, bright accents (WCAG AAA text) */
+:root[data-theme="contrast"] { color-scheme: dark; --bg: #000; --panel: #0a0a0a; --line: #8a8a8a; --text: #fff; --dim: #d0d0d0; --accent: #ffb000; --accent-2: #4dffb8; --err: #ff8080; --warn: #ffe066; --syn-kw: #ff9cff; --syn-str: #9dffb0; --syn-num: #ffe066; --syn-note: #ffb080; --syn-op: #8ec8ff; --syn-br: #d0b8ff; --syn-fn: #8ec8ff; --syn-prop: #8ec8ff; }
+:root[data-theme="contrast"] button, :root[data-theme="contrast"] select, :root[data-theme="contrast"] input { border-color: #fff; }
+:root[data-theme="contrast"] button.primary { color: #000; }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; }
@@ -42,7 +50,8 @@ main { flex: 1; min-height: 0; display: flex; }
 .error { margin: 0; padding: 10px 16px; background: color-mix(in srgb, var(--err) 14%, var(--bg)); color: var(--err); border-top: 1px solid var(--err); font: 13px/1.5 var(--mono); white-space: pre-wrap; max-height: 30vh; overflow: auto; }
 .status { padding: 4px 16px; font-size: 12px; color: var(--dim); border-top: 1px solid var(--line); }
 
-.help { width: 340px; flex: none; overflow: auto; padding: 14px 16px; background: var(--panel); border-left: 1px solid var(--line); font-size: 13px; }
+/* panels live in the dock (see workspace.js): each is one section with a head and a scrolling body */
+.help { overflow: auto; padding: 14px 16px; background: var(--panel); font-size: 13px; min-height: 0; }
 .help[hidden], .error[hidden] { display: none; }
 .help h2 { margin: 0 0 6px; font-size: 15px; }
 .help h3 { margin: 16px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--dim); }
@@ -96,7 +105,6 @@ main { flex: 1; min-height: 0; display: flex; }
 
 
 /* Visual editors */
-.help.visual { width: 420px; }
 .vis-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
 .vis-tabs button { font-family: var(--mono); font-size: 12px; padding: 3px 9px; }
 .vis-tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -134,11 +142,65 @@ main { flex: 1; min-height: 0; display: flex; }
 .vis-err { color: var(--err); }
 .cm-knob-target { }
 
+/* Dock */
+.dock[hidden], .dock-panel[hidden] { display: none; }                  /* a class that sets display would otherwise beat the hidden attribute */
+.dock { position: relative; display: flex; flex-direction: column; flex: none; width: var(--dock-w, 400px); min-width: 0; background: var(--panel); border-left: 1px solid var(--line); }
+main.dock-left { flex-direction: row-reverse; }
+main.dock-left .dock { border-left: 0; border-right: 1px solid var(--line); }
+.dock-handle { position: absolute; top: 0; bottom: 0; left: -3px; width: 7px; cursor: col-resize; z-index: 5; }
+main.dock-left .dock-handle { left: auto; right: -3px; }
+.dock-handle:hover, .dock-handle:focus-visible { background: color-mix(in srgb, var(--accent) 45%, transparent); outline: none; }
+.dock { overflow-y: auto; }
+.dock-panel { display: flex; flex-direction: column; flex: 1 1 0; min-height: 190px; border-bottom: 1px solid var(--line); }
+.dock-panel:last-child { border-bottom: 0; }
+.dock-panel.collapsed { flex: none; min-height: 0; }
+.dock-panel.collapsed .dock-body { display: none; }
+.dock-head { display: flex; align-items: center; gap: 6px; padding: 3px 8px; background: color-mix(in srgb, var(--text) 5%, var(--panel)); border-bottom: 1px solid var(--line); font-size: 12px; color: var(--dim); }
+.dock-head span { flex: 1; cursor: pointer; }
+.dock-btn { border: 0; background: none; padding: 0 6px; font-size: 14px; color: var(--dim); }
+.dock-btn:hover { color: var(--text); }
+.dock-body { flex: 1; min-height: 0; overflow: hidden; display: flex; }
+.dock-body > .help { flex: 1; min-width: 0; }
+#toolbar-panels button[aria-pressed="true"], .bar button.panel-on { background: color-mix(in srgb, var(--accent) 22%, var(--bg)); border-color: var(--accent); }
+
+/* Command palette */
+.palette-overlay { position: fixed; inset: 0; background: rgb(0 0 0 / .45); display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; z-index: 50; }
+.palette { width: min(620px, 92vw); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 20px 60px rgb(0 0 0 / .5); overflow: hidden; }
+.palette input { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--text); font: 16px system-ui, sans-serif; padding: 14px 16px; outline: none; }
+.palette ul { list-style: none; margin: 0; padding: 4px; max-height: 50vh; overflow: auto; }
+.palette li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
+.palette li[aria-selected="true"] { background: var(--accent); color: #fff; }
+.palette li .hint { font-size: 12px; opacity: .7; }
+.palette-foot { padding: 6px 14px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }
+
 /* Live visuals */
 .viz { border-top: 1px solid var(--line); background: var(--panel); flex: none; }
 .viz-bar { display: flex; align-items: center; gap: 4px; padding: 3px 12px; font-size: 12px; color: var(--dim); }
 .viz-bar span { margin-right: 8px; }
 .viz-bar button { font-size: 12px; padding: 1px 8px; }
 .viz-bar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.viz canvas { display: block; width: 100%; height: 170px; }
+.viz { --viz-h: 170px; position: relative; }
+.viz canvas { display: block; width: 100%; height: var(--viz-h); }
+.viz-resize { position: absolute; top: -3px; left: 0; right: 0; height: 7px; cursor: row-resize; z-index: 4; }
+.viz-resize:hover { background: color-mix(in srgb, var(--accent) 45%, transparent); }
 .viz.collapsed canvas { display: none; }
+
+/* History and scenes */
+.hist-scenes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.hist-scene { display: inline-flex; align-items: center; }
+.hist-scene > button:first-child { border-radius: 6px 0 0 6px; }
+.hist-scene .vis-x { border: 1px solid var(--line); border-left: 0; border-radius: 0 6px 6px 0; padding: 5px 7px; }
+.hist-save { display: flex; gap: 6px; }
+.hist-save input { flex: 1; min-width: 0; }
+.hist input, .hist select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+.hist-ab { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.hist-ab label { display: flex; align-items: center; gap: 6px; }
+.hist-ab select { flex: 1; min-width: 0; font-size: 12px; }
+.hist-list { list-style: none; margin: 0; padding: 0; }
+.hist-list li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.hist-list li.by-claude .hist-title b { color: var(--accent); }
+.hist-line { display: flex; gap: 6px; align-items: center; }
+.hist-title { flex: 1; text-align: left; border: 0; background: none; padding: 2px 0; font-size: 13px; }
+.hist-diff, .hist-ctx { margin: 6px 0; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow: auto; max-height: 260px; }
+.hist-diff .add { color: var(--accent-2); }
+.hist-diff .del { color: var(--err); }

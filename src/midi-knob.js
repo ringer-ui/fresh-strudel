@@ -27,7 +27,7 @@ export function createMidiKnob({ editor, onEdited }) {
     const text = knob.turn(value, s.target);
     if (text == null || text === editor.value.slice(s.target.from, s.target.to)) return;
     const from = s.target.from;
-    editor.replace(from, s.target.to, text);
+    editor.replace(from, s.target.to, text, 'knob');
     knob.follow(from);
     resolveTarget(); emit();
     onEdited();

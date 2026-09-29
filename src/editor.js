@@ -141,6 +141,7 @@ export function locateError(doc, message) {
 
 export function createEditor({ parent, doc, onChange, onRun, onStop, getNames }) {
   const listeners = new Set();
+  let pendingSource = null;                                    // who is making the next change (visual editor, knob, snippet...); null = the user typing
   const view = new EditorView({
     parent,
     state: EditorState.create({
@@ -156,7 +157,7 @@ export function createEditor({ parent, doc, onChange, onRun, onStop, getNames })
         ]),
         EditorView.contentAttributes.of({ 'aria-label': 'Song code', spellcheck: 'false', autocapitalize: 'off', autocorrect: 'off' }),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged && !u.transactions.some((tr) => tr.annotation(silent))) onChange();
+          if (u.docChanged && !u.transactions.some((tr) => tr.annotation(silent))) { const src = pendingSource ?? 'typing'; pendingSource = null; onChange(src); }
           if (u.docChanged || u.selectionSet) queueMicrotask(() => { for (const f of listeners) f(); });   // after this update finishes: listeners may dispatch too
         }),
       ],
@@ -169,12 +170,14 @@ export function createEditor({ parent, doc, onChange, onRun, onStop, getNames })
     // Programmatic replacement: doesn't call onChange (the caller decides what should follow, as it did with the textarea).
     setValue(code) { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: code }, annotations: silent.of(true) }); this.setError(null); },
     // Adds a line's worth of code at the end of the line the cursor is on (calls onChange).
-    insertAtLineEnd(code) {
+    insertAtLineEnd(code, source) {
+      pendingSource = source ?? null;
       const at = view.state.doc.lineAt(view.state.selection.main.head).to;
       view.dispatch({ changes: { from: at, insert: code }, selection: { anchor: at + code.length }, scrollIntoView: true });
     },
     // Adds code as a new paragraph at the end (calls onChange).
-    append(code) {
+    append(code, source) {
+      pendingSource = source ?? null;
       const cur = text(), body = cur.replace(/\s*$/, '');
       const insert = (body ? '\n\n' : '') + code + '\n';
       view.dispatch({ changes: { from: body.length, to: cur.length, insert }, scrollIntoView: true });
@@ -197,7 +200,7 @@ export function createEditor({ parent, doc, onChange, onRun, onStop, getNames })
     // The visual editors' hooks: where the cursor is, be told about edits and cursor moves, replace an exact range (calls onChange).
     cursor() { return view.state.selection.main.head; },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    replace(from, to, text) { view.dispatch({ changes: { from, to, insert: text } }); },
+    replace(from, to, text, source) { pendingSource = source ?? null; view.dispatch({ changes: { from, to, insert: text } }); },
     moveTo(pos) { view.dispatch({ selection: { anchor: Math.min(pos, view.state.doc.length) }, scrollIntoView: true }); },
     selection() { const r = view.state.selection.main; return { from: r.from, to: r.to }; },
     markTarget(range) {

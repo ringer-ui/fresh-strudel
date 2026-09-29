@@ -122,7 +122,7 @@ function Panel({ editor, onEdited, midi }) {
   const cur = editor.cursor();
   const st = statements.findLast((s) => s.start <= cur) ?? statements[0];      // the statement the cursor is in (or the last one before it)
   const tracks = findTracks(code);
-  const edit = (e) => { editor.replace(e.from, e.to, e.text); onEdited(); };
+  const edit = (e) => { editor.replace(e.from, e.to, e.text, 'visual'); onEdited(); };
   if (!st) return <p class="note">Nothing to show yet. Add a track (try Snippets), then click into it.</p>;
   const grids = findDrumGrids(code).filter((g) => inside(g, st));
   const notes = findNoteStrings(code).filter((n) => inside(n, st));
