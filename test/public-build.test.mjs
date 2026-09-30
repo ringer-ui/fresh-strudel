@@ -85,5 +85,7 @@ test('collected third-party code and corpus databases can never be published', a
   execFileSync('node', ['scripts/export-public-source.mjs', out], { cwd: root, stdio: 'pipe' });
   const exported = fs.readdirSync(out, { recursive: true }).map(String).filter((f) => !/^node_modules/.test(f));
   assert.ok(exported.length > 20 && !exported.some((f) => BANNED_PATH.test(f)), 'the export contains a banned path');
-  assert.match(fs.readFileSync(path.join(out, '.gitignore'), 'utf8'), /strudelstore\/[\s\S]*\*\.db/);
+  const ignore = fs.readFileSync(path.join(out, '.gitignore'), 'utf8');
+  assert.match(ignore, /strudelstore\/[\s\S]*\*\.db/);
+  for (const p of ['.env', '.env.*', '*.pem', '*.key', '.dev.vars']) assert.ok(ignore.split('\n').includes(p), `${p} must be git-ignored`);
 });

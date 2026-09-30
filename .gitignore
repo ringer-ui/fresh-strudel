@@ -7,3 +7,12 @@ strudelstore/
 *.db
 *.db-wal
 *.db-shm
+# secrets: never commit these
+.env
+.env.*
+.dev.vars
+.wrangler/
+*.pem
+*.key
+.twilio
+.audiology-*
